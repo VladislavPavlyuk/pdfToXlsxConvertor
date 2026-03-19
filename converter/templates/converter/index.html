@@ -114,6 +114,7 @@
           />
           <button id="upload-btn" type="button">Upload</button>
           <button id="convert-btn" type="submit">Upload and Convert</button>
+          <button id="clear-btn" class="danger" type="button">Clear</button>
         </div>
         <div class="progress">
           <div class="progress-bar" id="progress-bar"></div>
@@ -128,7 +129,6 @@
             <input type="checkbox" id="select-all" />
             Select all
           </label>
-          <button id="refresh-uploads" type="button">Refresh</button>
           <button id="convert-selected" type="button">Convert selected</button>
           <button id="delete-selected" class="danger" type="button">
             Delete selected
@@ -148,7 +148,6 @@
             <input type="checkbox" id="select-all-outputs" />
             Select all
           </label>
-          <button id="refresh-outputs" type="button">Refresh</button>
           <button id="copy-outputs" type="button">Copy selected to</button>
           <button id="move-outputs" type="button">Move selected to</button>
           <button id="delete-outputs" class="danger" type="button">
@@ -162,50 +161,30 @@
         <p class="status" id="outputs-status">No outputs loaded.</p>
       </div>
 
-      <div class="row">
-        <div class="panel">
-          <div class="actions">
-            <h2 style="margin: 0;">Input List</h2>
-            <button id="refresh-inputs" type="button">Refresh</button>
-          </div>
-          <ul id="input-list"></ul>
-        </div>
-        <div class="panel">
-          <div class="actions">
-            <h2 style="margin: 0;">Output List</h2>
-            <button id="refresh-output-list" type="button">Refresh</button>
-          </div>
-          <ul id="output-list"></ul>
-        </div>
-      </div>
+      <div class="row"></div>
     </div>
 
     <script>
       const form = document.getElementById("convert-form");
       const fileInput = document.getElementById("file-input");
-      const inputList = document.getElementById("input-list");
-      const outputList = document.getElementById("output-list");
       const progressBar = document.getElementById("progress-bar");
       const statusText = document.getElementById("status-text");
       const convertBtn = document.getElementById("convert-btn");
       const uploadBtn = document.getElementById("upload-btn");
+      const clearBtn = document.getElementById("clear-btn");
       const uploadsList = document.getElementById("uploads-list");
       const uploadsStatus = document.getElementById("uploads-status");
       const uploadsProgress = document.getElementById("uploads-progress");
       const selectAll = document.getElementById("select-all");
-      const refreshUploads = document.getElementById("refresh-uploads");
       const convertSelected = document.getElementById("convert-selected");
       const deleteSelected = document.getElementById("delete-selected");
       const outputsList = document.getElementById("outputs-list");
       const outputsStatus = document.getElementById("outputs-status");
       const outputsProgress = document.getElementById("outputs-progress");
       const selectAllOutputs = document.getElementById("select-all-outputs");
-      const refreshOutputs = document.getElementById("refresh-outputs");
       const deleteOutputs = document.getElementById("delete-outputs");
       const copyOutputs = document.getElementById("copy-outputs");
       const moveOutputs = document.getElementById("move-outputs");
-      const refreshInputs = document.getElementById("refresh-inputs");
-      const refreshOutputList = document.getElementById("refresh-output-list");
 
       function clearList(list) {
         while (list.firstChild) {
@@ -369,6 +348,7 @@
             : "Delete completed."
         );
         fetchUploads();
+        fetchOutputs();
       }
 
       async function convertSelectedUploads() {
@@ -398,26 +378,16 @@
                 body: formData,
               }
             );
-            const data = await response.json();
-            if (!response.ok) {
-              errors += 1;
-            } else if (data.results) {
-              data.results.forEach((result) => {
-                const item = document.createElement("li");
-                if (result.error) {
-                  errors += 1;
-                  item.textContent = `${result.name}: ${result.error}`;
-                  item.classList.add("error");
-                } else {
-                  const link = document.createElement("a");
-                  link.href = result.url;
-                  link.textContent = `${result.name} -> ${result.output}`;
-                  link.setAttribute("download", result.output);
-                  item.appendChild(link);
-                }
-                outputList.appendChild(item);
-              });
-            }
+          const data = await response.json();
+          if (!response.ok) {
+            errors += 1;
+          } else if (data.results) {
+            data.results.forEach((result) => {
+              if (result.error) {
+                errors += 1;
+              }
+            });
+          }
           } catch (error) {
             errors += 1;
           }
@@ -430,6 +400,7 @@
             : "Conversion completed."
         );
         fetchOutputs();
+        fetchUploads();
       }
 
       async function deleteOutputFiles() {
@@ -470,8 +441,10 @@
             : "Delete completed."
         );
         fetchOutputs();
+        fetchUploads();
       }
 
+      /** Save selected output files to a folder on the user's PC via folder picker (when available) or download to browser Downloads. */
       async function copyOrMoveWithDirectoryPicker(actionLabel, deleteAfterCopy) {
         const selected = Array.from(
           document.querySelectorAll(".output-checkbox:checked")
@@ -484,74 +457,102 @@
           return;
         }
 
-        if (!window.showDirectoryPicker) {
-          setOutputsStatus("Directory picker not supported.", true);
-          return;
-        }
-
-        let directoryHandle;
-        try {
-          directoryHandle = await window.showDirectoryPicker({
-            mode: "readwrite",
-            startIn: "downloads",
-          });
-        } catch (error) {
-          if (error && error.name === "AbortError") {
-            setOutputsStatus("Cancelled.");
+        if (window.showDirectoryPicker) {
+          let directoryHandle;
+          try {
+            directoryHandle = await window.showDirectoryPicker({
+              mode: "readwrite",
+              startIn: "downloads",
+            });
+          } catch (error) {
+            if (error && error.name === "AbortError") {
+              setOutputsStatus("Cancelled.");
+              return;
+            }
+            setOutputsStatus("Directory selection failed.", true);
             return;
           }
-          setOutputsStatus("Directory selection failed.", true);
+          setOutputsStatus(`${actionLabel} in progress...`);
+          const failures = [];
+          setProgress(outputsProgress, 0, selected.length);
+          let completed = 0;
+          for (const file of selected) {
+            try {
+              if (!file.url) throw new Error("Missing file URL.");
+              const response = await fetch(file.url);
+              if (!response.ok) throw new Error("Failed to fetch file.");
+              const blob = await response.blob();
+              const fileHandle = await directoryHandle.getFileHandle(file.name, { create: true });
+              const writable = await fileHandle.createWritable();
+              await writable.write(blob);
+              await writable.close();
+            } catch (error) {
+              failures.push(file.name);
+            }
+            completed += 1;
+            setProgress(outputsProgress, completed, selected.length);
+          }
+          if (deleteAfterCopy) {
+            const formData = new FormData();
+            selected.forEach((file) => formData.append("names", file.name));
+            await fetch("{% url 'delete_outputs' %}", {
+              method: "POST",
+              headers: { "X-CSRFToken": "{{ csrf_token }}" },
+              body: formData,
+            });
+          }
+          if (failures.length) {
+            setOutputsStatus(`${actionLabel} done with errors: ${failures.length} failed.`, true);
+          } else {
+            setOutputsStatus(`${actionLabel} done.`);
+          }
+          fetchOutputs();
+          fetchUploads();
           return;
         }
 
-        setOutputsStatus(`${actionLabel} in progress...`);
+        /* Fallback when folder picker is not available (e.g. NAS over HTTP): download each file to browser Downloads. */
+        setOutputsStatus(`${actionLabel} in progress (downloading to your PC)...`);
         const failures = [];
         setProgress(outputsProgress, 0, selected.length);
         let completed = 0;
         for (const file of selected) {
           try {
-            if (!file.url) {
-              throw new Error("Missing file URL.");
-            }
+            if (!file.url) throw new Error("Missing file URL.");
             const response = await fetch(file.url);
-            if (!response.ok) {
-              throw new Error("Failed to fetch file.");
-            }
+            if (!response.ok) throw new Error("Failed to fetch file.");
             const blob = await response.blob();
-            const fileHandle = await directoryHandle.getFileHandle(file.name, {
-              create: true,
-            });
-            const writable = await fileHandle.createWritable();
-            await writable.write(blob);
-            await writable.close();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = file.name;
+            a.style.display = "none";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
           } catch (error) {
             failures.push(file.name);
           }
           completed += 1;
           setProgress(outputsProgress, completed, selected.length);
         }
-
         if (deleteAfterCopy) {
           const formData = new FormData();
           selected.forEach((file) => formData.append("names", file.name));
           await fetch("{% url 'delete_outputs' %}", {
             method: "POST",
-            headers: {
-              "X-CSRFToken": "{{ csrf_token }}",
-            },
+            headers: { "X-CSRFToken": "{{ csrf_token }}" },
             body: formData,
           });
         }
-
         if (failures.length) {
-          setOutputsStatus(
-            `${actionLabel} done with errors: ${failures.length} failed.`,
-            true
-          );
+          setOutputsStatus(`${actionLabel} done with errors: ${failures.length} failed.`, true);
         } else {
-          setOutputsStatus(`${actionLabel} done.`);
+          setOutputsStatus(`${actionLabel} done. Files in your Downloads folder.`);
         }
         fetchOutputs();
+        fetchUploads();
       }
 
       async function submitOutputAction(actionUrl, actionLabel) {
@@ -598,29 +599,17 @@
           `${actionLabel} done. ${errors ? `${errors} error(s).` : "All good."}`
         );
         fetchOutputs();
-      }
-
-      function renderInputs(files) {
-        clearList(inputList);
-        if (!files.length) {
-          setStatus("Select PDF files to convert.");
-          return;
-        }
-        files.forEach((file) => {
-          const item = document.createElement("li");
-          item.textContent = file.name;
-          inputList.appendChild(item);
-        });
-        setStatus(`${files.length} file(s) ready for conversion.`);
-      }
-
-      function refreshInputListFromSelection() {
-        renderInputs(Array.from(fileInput.files));
+        fetchUploads();
       }
 
       fileInput.addEventListener("change", () => {
-        renderInputs(Array.from(fileInput.files));
-        clearList(outputList);
+        setStatus("Files selected.");
+        progressBar.style.width = "0%";
+      });
+
+      clearBtn.addEventListener("click", () => {
+        fileInput.value = "";
+        setStatus("Selection cleared.");
         progressBar.style.width = "0%";
       });
 
@@ -670,6 +659,7 @@
           errors ? `Upload completed with ${errors} error(s).` : "Upload complete."
         );
         fetchUploads();
+        fetchOutputs();
       });
 
       selectAll.addEventListener("change", () => {
@@ -686,27 +676,11 @@
         });
       });
 
-      refreshUploads.addEventListener("click", fetchUploads);
       convertSelected.addEventListener("click", convertSelectedUploads);
       deleteSelected.addEventListener("click", deleteUploads);
-      refreshOutputs.addEventListener("click", fetchOutputs);
       deleteOutputs.addEventListener("click", deleteOutputFiles);
-      refreshInputs.addEventListener("click", refreshInputListFromSelection);
-      refreshOutputList.addEventListener("click", () => fetchOutputs());
-      copyOutputs.addEventListener("click", () => {
-        if (window.showDirectoryPicker) {
-          copyOrMoveWithDirectoryPicker("Copy", false);
-        } else {
-          submitOutputAction("{% url 'copy_outputs' %}", "Copy");
-        }
-      });
-      moveOutputs.addEventListener("click", () => {
-        if (window.showDirectoryPicker) {
-          copyOrMoveWithDirectoryPicker("Move", true);
-        } else {
-          submitOutputAction("{% url 'move_outputs' %}", "Move");
-        }
-      });
+      copyOutputs.addEventListener("click", () => copyOrMoveWithDirectoryPicker("Copy", false));
+      moveOutputs.addEventListener("click", () => copyOrMoveWithDirectoryPicker("Move", true));
 
       fetchUploads();
       fetchOutputs();
@@ -718,7 +692,6 @@
           return;
         }
 
-        clearList(outputList);
         progressBar.style.width = "0%";
         convertBtn.disabled = true;
         setStatus("Uploading and converting...");
@@ -757,19 +730,9 @@
             const data = xhr.response;
             if (data && data.results) {
               data.results.forEach((result) => {
-                const item = document.createElement("li");
                 if (result.error) {
                   errors += 1;
-                  item.textContent = `${result.name}: ${result.error}`;
-                  item.classList.add("error");
-                } else {
-                  const link = document.createElement("a");
-                  link.href = result.url;
-                  link.textContent = `${result.name} -> ${result.output}`;
-                  link.setAttribute("download", result.output);
-                  item.appendChild(link);
                 }
-                outputList.appendChild(item);
               });
             }
           }
@@ -784,6 +747,7 @@
             : "Conversion complete."
         );
         fetchOutputs();
+        fetchUploads();
       });
     </script>
   </body>
