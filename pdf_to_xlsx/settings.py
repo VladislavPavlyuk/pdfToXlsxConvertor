@@ -1,10 +1,14 @@
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "dev-secret-key"
-DEBUG = True
-ALLOWED_HOSTS: list[str] = ["*"]
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key")
+DEBUG = os.environ.get("DEBUG", "true").lower() in ("1", "true", "yes")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").strip().split(",") if os.environ.get("ALLOWED_HOSTS") else ["*"]
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE_DIR)))
+MEDIA_ROOT = DATA_DIR / "media"
+DATABASE_PATH = DATA_DIR / "db.sqlite3"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -50,7 +54,7 @@ ASGI_APPLICATION = "pdf_to_xlsx.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": str(DATABASE_PATH),
     }
 }
 
@@ -70,4 +74,3 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"

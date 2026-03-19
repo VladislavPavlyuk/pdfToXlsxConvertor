@@ -92,7 +92,26 @@ If deploying beyond a local environment, apply the following:
 - Add antivirus or malware scanning for uploaded PDFs.
 - Use a proper reverse proxy (e.g., Nginx) and serve media files securely.
 
-## Running
+## Docker
+
+```powershell
+docker compose up -d --build
+```
+
+App at `http://localhost:8000/`. Data (uploads, outputs, DB) is in a named volume `pdf2xlsx_data`.
+
+## Deploy to QNAP NAS
+
+Target: `192.168.0.213`. On the NAS: enable **SSH** (Control Panel → Terminal & SNMP) and **Container Station** (Docker).
+
+From project root:
+
+- **PowerShell:** `.\deploy.ps1` (set `$env:NAS_USER = "admin"` if needed)
+- **Bash/WSL:** `chmod +x deploy.sh && ./deploy.sh` (set `NAS_USER`, `NAS_HOST`, `REMOTE_DIR` if needed)
+
+Then open `http://192.168.0.213:8000/`.
+
+## Running (local)
 
 ```powershell
 pip install -r requirements.txt

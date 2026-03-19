@@ -2,3 +2,4 @@ tabula-py
 pandas
 openpyxl
 django
+gunicorn

@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    container_name: pdf2xlsx
+    ports:
+      - "8001:8000"   # host:container (8001 avoids conflict if 8000 is already in use on NAS)
+    environment:
+      - DEBUG=0
+      - ALLOWED_HOSTS=*
+      - DATA_DIR=/app/data
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-change-me-in-production}
+    volumes:
+      - pdf2xlsx_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  pdf2xlsx_data:
